@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <meta charset="utf-8">
+            <meta name="viewport"
+            content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
+            <style>
+                body {
+                    margin: 0;
+                    padding: 8px;
+                    font-family: "PingFang SC", "Heiti SC", "Arial Unicode MS", sans-serif;
+                    background: transparent;
+                    min-height: auto;
+                }
+                .formula-wrapper {
+                    display: block;
+                    margin-bottom: 20px;
+                }
+                .formula-container {
+                    display: inline-block;
+                    vertical-align: top;
+                    margin-bottom: 10px;
+                }
+            </style>
+            
+            <!-- 引入 KaTeX 与 html2canvas -->
+            <link rel="stylesheet" href="./katex.min.css">
+                <script src="./html2canvas.min.js"></script>
+                <script src="./katex.min.js"></script>
+    </head>
+    <body>
+        <div id="root"></div>
+        
+        <script>
+            window.katexReady = false;
+            window.html2canvasReady = false;
+            
+            /** 检测库加载完成 **/
+            function tryNotifyReady() {
+                if (window.katexReady && window.html2canvasReady) {
+                    if (window.webkit?.messageHandlers?.katexReadyHandler) {
+                        window.webkit.messageHandlers.katexReadyHandler.postMessage(true);
+                    }
+                    if (typeof window.onLatexWebReady === 'function') {
+                        window.onLatexWebReady();
+                    }
+                }
+            }
+            
+            function checkKaTeX() {
+                if (window.katex) {
+                    window.katexReady = true;
+                    tryNotifyReady();
+                } else {
+                    setTimeout(checkKaTeX, 50);
+                }
+            }
+            
+            function checkHtml2Canvas() {
+                if (window.html2canvas) {
+                    window.html2canvasReady = true;
+                    tryNotifyReady();
+                } else {
+                    setTimeout(checkHtml2Canvas, 50);
+                }
+            }
+            
+            window.addEventListener('load', () => {
+                checkKaTeX();
+                checkHtml2Canvas();
+            });
+            
+            /**
+             * 渲染多个公式（由外部传入 batchId，可并行任务）
+             * @param {string} batchId - 任务唯一标识，由 OC 传入
+             * @param {string} latexArray - 公式数组JSON字符串
+             * @param {number} scale - 截图缩放比例
+             */
+            function renderFormulasBatch(batchId, latexArray, scale = 2) {
+                try {
+                    // 支持传入 JSON 字符串
+                    if (typeof latexArray === 'string') {
+                        latexArray = JSON.parse(latexArray);
+                    }
+                } catch (err) {
+                    console.error("解析 latexArray JSON 出错:", err);
+                    return;
+                }
+                
+                const wrapper = document.getElementById(`wrapper-${batchId}`);
+                if (!wrapper) {
+                    const newWrapper = document.createElement('div');
+                    newWrapper.id = `wrapper-${batchId}`;
+                    newWrapper.className = 'batch-wrapper';
+                    document.body.appendChild(newWrapper);
+                }
+                
+                const containerWrapper = document.getElementById(`wrapper-${batchId}`);
+                containerWrapper.innerHTML = ''; // 清空旧内容
+                
+                const results = [];
+                let renderedCount = 0;
+                
+                latexArray.forEach((latex, index) => {
+                    const container = document.createElement('div');
+                    container.className = 'formula-container';
+                    container.id = `formula-${batchId}-${index}`;
+                    containerWrapper.appendChild(container);
+                    
+                    try {
+                        katex.render(latex, container, { throwOnError: false, displayMode: true });
+                    } catch (e) {
+                        console.error("KaTeX render error:", e);
+                    }
+                    
+                    html2canvas(container, { backgroundColor: '#ffffff', scale: scale }).then(canvas => {
+                        const base64 = canvas.toDataURL("image/jpeg", 0.8)
+                        results[index] = { latex: latex, base64: base64 };
+                        
+                        renderedCount++;
+                        if (renderedCount === latexArray.length) {
+                            sendBatchResult(batchId, results);
+                            // 渲染完成后销毁容器，避免累积
+                            containerWrapper.remove();
+                        }
+                    });
+                });
+                
+                function sendBatchResult(batchId, resultsArray) {
+                    if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.katexHandler) {
+                        window.webkit.messageHandlers.katexHandler.postMessage({
+                            batchId: batchId,
+                            results: resultsArray
+                        });
+                    }
+                }
+            }
+            
+        </script>
+    </body>
+</html>
+<!--const base64 = canvas.toDataURL("image/png");-->
